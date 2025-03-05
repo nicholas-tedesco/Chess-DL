@@ -15,9 +15,9 @@ import re
 
 # retrieve HTML for lichess database webpage ------------------------------------------------------
 
-url = 'https://database.lichess.org/'
+db_url = 'https://database.lichess.org/'
 
-r = requests.get(url) 
+r = requests.get(db_url) 
 page_html = r.text 
 
 
@@ -35,8 +35,17 @@ final_links = [link for link in standard_links if any(year in link for year in i
 
 # for each dataset, only keep games above ELO threshold -------------------------------------------
 
-test_link = final_links[0]
+test_link = db_url + final_links[0]
 min_elo = 2200
+
+print(test_link)
+
+# s = requests.Session() 
+# with s.get(test_link, stream=True) as resp: 
+#     for line in resp.iter_lines(): 
+#         if line: 
+#             print(line) 
+#             raise Exception('stop')
 
 
 
