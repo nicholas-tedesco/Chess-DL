@@ -65,7 +65,7 @@ def parse_lichess_stream(url, min_elo):
             ## file is being processed line by line; one "record" will have many lines 
             for line in buffer:
                 
-                if i % 1_000_000 == 1: 
+                if i % 1_000_000 == 0: 
                     print(f'\rReading Line: {i+1:,}', end = '')
 
                 line = line.strip() 
