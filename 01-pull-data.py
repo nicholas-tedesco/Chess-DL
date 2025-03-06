@@ -12,6 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 import zstandard as zstd 
 import io 
+import re 
 
 
 # retrieve HTML for lichess database webpage ------------------------------------------------------
@@ -38,27 +39,30 @@ final_links = [db_url + link for link in filtered_links]
 
 # for each dataset, only keep games above ELO threshold -------------------------------------------
 
-def parse_lichess_stream(url, min_elo):
+def parse_lichess_stream(url, elo_req):
 
-    ## create response object, streaming data from download link 
+    """ given a download link to lichess game data and minimum elo requirements, 
+        creates an HTTP stream and filters data to meet requirements, 
+        returns a dataframe of filtered game data. 
+    """
+
+    ## create response object, which is HTTP stream of game data 
     with requests.get(url, stream=True) as response:
 
         response.raise_for_status()
         dctx = zstd.ZstdDecompressor()
 
-        ## decompress file as it is read 
+        ## link downloads compressed data; have to decompress as we go
         with dctx.stream_reader(response.raw) as reader:
             
             buffer = io.TextIOWrapper(reader, encoding='utf-8')
 
-            keep_white_elo = [] 
-            keep_black_elo = [] 
-            keep_pgn = [] 
-
+            final_game_data = pd.DataFrame()
             game_details = {} 
 
-            keep = False
-            skip = True
+            meets_elo = False
+            lost_on_time = False 
+            skip_line = True 
 
             i = 0 
 
@@ -70,58 +74,69 @@ def parse_lichess_stream(url, min_elo):
 
                 line = line.strip() 
 
-                ## game metadata (descriptors) characterized by brackets 
+                ## lines containing game metadata (descriptors) characterized by brackets 
                 if line.startswith('['): 
 
-                    if 'WhiteElo' in line: 
+                    if line.startswith('[Event'):
+                        game_details['Time Control'] = ' '.join(line.split('"')[1].split(' ')[0:2]).strip()
+                        game_details['Event Type'] = line.split('"')[1].split(' ')[2].capitalize()
+
+                    elif line.startswith('[WhiteElo'): 
                         try: 
                             elo = int(line.split('"')[1])
                             game_details['WhiteElo'] = elo 
-                            if elo >= min_elo: 
-                                keep = True 
                         ## if we're picking up a username, simply continue 
                         except: 
                             pass 
 
-                    elif 'BlackElo' in line: 
+                    elif line.startswith('[BlackElo'): 
                         try: 
                             elo = int(line.split('"')[1])
                             game_details['BlackElo'] = elo 
-                            if elo >= min_elo: 
-                                keep = True 
                         except: 
                             pass
 
-                ## first non-blank line after metadata is PGN... however, one blank line separating
-                elif line: 
-                    if keep: 
-                        game_details['PGN'] = line 
+                    elif line.startswith('[Opening'): 
+                        game_details['Opening'] = line.split('"')[1]
 
+                    elif line.startswith('[Termination'):
+                        game_details['Termination'] = line.split('"')[1]
+
+                ## blank line used to separate metadata:PGN and game1:game2
+                elif not line: 
+                    continue
+                
+                ## if non-blank and no brackets, line is PGN. last line of a given game is PGN 
                 else: 
+                    
+                    ## check if game meets requirements 
+                    if game_details['WhiteElo'] >= max(elo_req) and game_details['BlackElo'] >= min(elo_req): 
+                        meets_elo = True 
 
-                    ## skip over blank line separating metadata / PGN 
-                    if skip:
-                        skip = False
-                        continue 
+                    if game_details['WhiteElo'] >= min(elo_req) and game_details['BlackElo'] >= max(elo_req): 
+                        meets_elo = True 
 
-                    ## if blank line is after PGN, signals boundary between prev and next games
-                    if keep: 
-                        keep_white_elo.append(game_details['WhiteElo'])
-                        keep_black_elo.append(game_details['BlackElo'])
-                        keep_pgn.append(game_details['PGN'])
+                    if 'Time forfeit' in game_details['Termination']: 
+                        lost_on_time = True 
 
-                    keep = False 
-                    skip = True
+                    ## if so, save 
+                    if meets_elo and not lost_on_time: 
+                        game_details['PGN'] = line 
+                        temp_game_data = pd.DataFrame([game_details]) 
+                        final_game_data = pd.concat([final_game_data, temp_game_data])
+
+                    ## reset game-specific trackers 
+                    meets_elo = False
+                    lost_on_time = False 
+                    skip_line = True
                     game_details = {} 
                     i += 1
-                
-    ## format results as dataframe 
-    output = pd.DataFrame({'WhiteElo': keep_white_elo, 'BlackElo': keep_black_elo, 'PGN': keep_pgn})
-    return output 
+
+    return final_game_data.reset_index(drop = True)
 
 
 for link in final_links: 
-    game_df = parse_lichess_stream(link, 2000) 
+    game_df = parse_lichess_stream(link, (2200, 2400)) 
     print(game_df.head())
     break 
 
