@@ -60,8 +60,13 @@ def parse_lichess_stream(url, min_elo):
             keep = False
             skip = True
 
+            i = 0 
+
             ## file is being processed line by line; one "record" will have many lines 
             for line in buffer:
+                
+                if i % 1_000_000 == 1: 
+                    print(f'\rReading Line: {i+1:,}', end = '')
 
                 line = line.strip() 
 
@@ -108,6 +113,7 @@ def parse_lichess_stream(url, min_elo):
                     keep = False 
                     skip = True
                     game_details = {} 
+                    i += 1
                 
     ## format results as dataframe 
     output = pd.DataFrame({'WhiteElo': keep_white_elo, 'BlackElo': keep_black_elo, 'PGN': keep_pgn})
