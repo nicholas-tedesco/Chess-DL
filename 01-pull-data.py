@@ -141,8 +141,7 @@ def init_db(path:str, table:str) -> None:
     """ initializes sqlite3 database in specified directory. 
     """
 
-    db_path = 'sqlite:///' + path
-    engine = create_engine(db_path)
+    engine = create_engine('sqlite:///' + db_path)
     conn = engine.connect() 
 
     # if table already exists, drop
@@ -194,18 +193,18 @@ if __name__ == '__main__':
     final_links = get_lichess_links(db_url, include_years)
     
     ## create db to store results
-    db_path = '../data/test'
+    db_path = '../data/lichess.db'
     table_name = 'games'
     init_db(db_path, table_name) 
 
     ## for each link, parse data and save locally 
-    min_elo1 = 2500 
-    min_elo2 = 2300 
+    min_elo1 = 2600 
+    min_elo2 = 2600 
     for link in final_links: 
         print(f'\n\tStarting iteration for {link}.') 
         game_data = parse_lichess_stream(link, min_elo1, min_elo2)
+        game_data.to_csv('../data/test.csv', index=False)
         insert_into_db(db_path, table_name, game_data) 
-        break
     print('')
 
 
