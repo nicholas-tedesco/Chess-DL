@@ -57,12 +57,11 @@ def parse_lichess_stream(link:str, elo_min1:int, elo_min2:int):
             
             buffer = io.TextIOWrapper(reader, encoding='utf-8')
 
-            final_game_data = pd.DataFrame()
+            final_games = [] 
             game_details = {} 
 
             meets_elo = False
             lost_on_time = False 
-            skip_line = True 
 
             i = 0 
 
@@ -118,18 +117,18 @@ def parse_lichess_stream(link:str, elo_min1:int, elo_min2:int):
                     ## if so, save 
                     if meets_elo and not lost_on_time: 
                         game_details['PGN'] = line 
-                        temp_game_data = pd.DataFrame([game_details]) 
-                        final_game_data = pd.concat([final_game_data, temp_game_data])
+                        final_games.append(game_details)
 
                     ## reset game-specific trackers 
                     meets_elo = False
                     lost_on_time = False 
-                    skip_line = True
                     game_details = {} 
 
                     ## CLI message 
                     print(f'\r\t- Current Line: {i:,}', end = '')
                     i += 1
+
+    final_game_data = pd.DataFrame(final_games) 
 
     final_game_data.reset_index(drop = True, inplace = True)
     final_game_data.drop(columns = ['Termination'], inplace = True)
@@ -206,6 +205,7 @@ if __name__ == '__main__':
         print(f'\n\tStarting iteration for {link}.') 
         game_data = parse_lichess_stream(link, min_elo1, min_elo2)
         insert_into_db(db_path, table_name, game_data) 
+        break
     print('')
 
 
