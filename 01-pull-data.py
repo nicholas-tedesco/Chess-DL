@@ -13,41 +13,41 @@ from bs4 import BeautifulSoup
 import zstandard as zstd 
 import io 
 import re 
+from sqlalchemy import create_engine, text
 
 
-# retrieve HTML for lichess database webpage ------------------------------------------------------
+# functions ---------------------------------------------------------------------------------------
 
-db_url = 'https://database.lichess.org/'
+def get_lichess_links(url:str, include_years:list[str]): 
 
-r = requests.get(db_url) 
-page_html = r.text 
+    """ retrieves download links for chess game files from lichess database. 
+    """
+
+    r = requests.get(url)
+    soup = BeautifulSoup(r.text, features='html.parser')
+
+    link_elements = soup.find_all('a')
+    links = [element.get('href') for element in link_elements]
+
+    standard_links = [link for link in links if 'standard/' in link and 'pgn.zst' in link and 'torrent' not in link]
+    filtered_links = [link for link in standard_links if any(year in link for year in include_years)]
+
+    final_links = [db_url + link for link in filtered_links]
+
+    return final_links
 
 
-# extract data download links, then filter --------------------------------------------------------
-
-soup = BeautifulSoup(page_html, features='html.parser')
-link_elements = soup.find_all('a')
-links = [element.get('href') for element in link_elements]
-
-standard_links = [link for link in links if 'standard/' in link and 'pgn.zst' in link and 'torrent' not in link]
-
-include_years = ('2024', '2025')
-filtered_links = [link for link in standard_links if any(year in link for year in include_years)]
-
-final_links = [db_url + link for link in filtered_links]
-
-
-# for each dataset, only keep games above ELO threshold -------------------------------------------
-
-def parse_lichess_stream(url, elo_req):
+def parse_lichess_stream(link:str, elo_min1:int, elo_min2:int):
 
     """ given a download link to lichess game data and minimum elo requirements, 
         creates an HTTP stream and filters data to meet requirements, 
         returns a dataframe of filtered game data. 
     """
 
+    elo_req = [elo_min1, elo_min2]
+
     ## create response object, which is HTTP stream of game data 
-    with requests.get(url, stream=True) as response:
+    with requests.get(link, stream=True) as response:
 
         response.raise_for_status()
         dctx = zstd.ZstdDecompressor()
@@ -68,9 +68,6 @@ def parse_lichess_stream(url, elo_req):
 
             ## file is being processed line by line; one "record" will have many lines 
             for line in buffer:
-                
-                if i % 1_000_000 == 0: 
-                    print(f'\rReading Line: {i+1:,}', end = '')
 
                 line = line.strip() 
 
@@ -78,8 +75,8 @@ def parse_lichess_stream(url, elo_req):
                 if line.startswith('['): 
 
                     if line.startswith('[Event'):
-                        game_details['Time Control'] = ' '.join(line.split('"')[1].split(' ')[0:2]).strip()
-                        game_details['Event Type'] = line.split('"')[1].split(' ')[2].capitalize()
+                        game_details['TimeControl'] = ' '.join(line.split('"')[1].split(' ')[0:2]).strip()
+                        game_details['EventType'] = line.split('"')[1].split(' ')[2].capitalize()
 
                     elif line.startswith('[WhiteElo'): 
                         try: 
@@ -98,7 +95,6 @@ def parse_lichess_stream(url, elo_req):
 
                     elif line.startswith('[Opening'): 
                         game_details['Opening'] = line.split('"')[1]
-
                     elif line.startswith('[Termination'):
                         game_details['Termination'] = line.split('"')[1]
 
@@ -130,14 +126,86 @@ def parse_lichess_stream(url, elo_req):
                     lost_on_time = False 
                     skip_line = True
                     game_details = {} 
+
+                    ## CLI message 
+                    print(f'\r\t- Current Line: {i:,}', end = '')
                     i += 1
 
-    return final_game_data.reset_index(drop = True)
+    final_game_data.reset_index(drop = True, inplace = True)
+    final_game_data.drop(columns = ['Termination'], inplace = True)
+
+    return final_game_data
 
 
-for link in final_links: 
-    game_df = parse_lichess_stream(link, (2200, 2400)) 
-    print(game_df.head())
-    break 
+def init_db(path:str, table:str) -> None: 
 
-game_df.to_csv('test.csv')
+    """ initializes sqlite3 database in specified directory. 
+    """
+
+    db_path = 'sqlite:///' + path
+    engine = create_engine(db_path)
+    conn = engine.connect() 
+
+    # if table already exists, drop
+
+    drop_table_query = text(f"""
+        DROP TABLE IF EXISTS {table}; 
+    """)
+
+    conn.execute(drop_table_query)
+    conn.commit() 
+
+    # create new table with proper column specs 
+
+    create_table_query = text(f"""
+        CREATE TABLE {table}(
+            GameID INTEGER PRIMARY KEY AUTOINCREMENT, 
+            TimeControl VARCHAR(30), 
+            EventType VARCHAR(30), 
+            WhiteElo INT, 
+            BlackElo INT, 
+            Opening VARCHAR(50), 
+            PGN VARCHAR(500)
+        );
+    """)
+
+    conn.execute(create_table_query) 
+    conn.commit() 
+
+    conn.close() 
+
+
+def insert_into_db(path:str, table:str, data:pd.DataFrame) -> None: 
+
+    """ given chess data, inserts into local database. 
+    """
+
+    engine = create_engine('sqlite:///' + path)
+    data.to_sql(table, engine, if_exists='append', index=False)
+    
+
+# script logic ------------------------------------------------------------------------------------
+
+if __name__ == '__main__': 
+
+    ## get download links for games by month 
+    db_url = 'https://database.lichess.org/'
+    include_years = ['2024', '2025']
+
+    final_links = get_lichess_links(db_url, include_years)
+    
+    ## create db to store results
+    db_path = '../data/test'
+    table_name = 'games'
+    init_db(db_path, table_name) 
+
+    ## for each link, parse data and save locally 
+    min_elo1 = 2500 
+    min_elo2 = 2300 
+    for link in final_links: 
+        print(f'\n\tStarting iteration for {link}.') 
+        game_data = parse_lichess_stream(link, min_elo1, min_elo2)
+        insert_into_db(db_path, table_name, game_data) 
+    print('')
+
+
