@@ -1,7 +1,7 @@
 # README ------------------------------------------------------------------------------------------
 # 
 #   file: 03-train-model.py
-#   goal: fit deep learning model to predict next chess board state given current board state
+#   goal: fit deep learning model to predict next game board state given current board state
 # 
 # -------------------------------------------------------------------------------------------------
 
