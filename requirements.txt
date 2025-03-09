@@ -4,3 +4,4 @@ beautifulsoup4
 zstandard
 sqlalchemy
 python-chess
+numpy 

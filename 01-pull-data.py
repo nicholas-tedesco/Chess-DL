@@ -188,7 +188,7 @@ if __name__ == '__main__':
 
     ## get download links for games by month 
     db_url = 'https://database.lichess.org/'
-    include_years = ['2024', '2025']
+    include_years = ['2025']
 
     final_links = get_lichess_links(db_url, include_years)
     
@@ -203,7 +203,6 @@ if __name__ == '__main__':
     for link in final_links: 
         print(f'\n\tStarting iteration for {link}.') 
         game_data = parse_lichess_stream(link, min_elo1, min_elo2)
-        game_data.to_csv('../data/test.csv', index=False)
         insert_into_db(db_path, table_name, game_data) 
     print('')
 
